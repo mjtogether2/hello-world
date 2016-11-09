@@ -1,9 +1,6 @@
 package com.crawl;
-import java.io.BufferedWriter;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -25,25 +22,18 @@ import utils.StreamUtil;
 
 public class WebCrawler {
 	public static void main(String[] args) {
+		
+		//此处代码其实不够完美，但因为上班问题，时间不是很充足，我是分开获取3中书籍，其实可以使用多线程来判断3种书的前100本
+		WebCrawler webCrawler = new WebCrawler();
 		String[] types = {"互联网","编程","算法"};
 		for (String string : types) {
-			new WebCrawler().crawl(string);
+			webCrawler.crawl(string);
 		}
 		
-//		String text = "hasdks\ntitle=\"(浪潮之巅)\"\nsdsd ";
-//		System.out.println(text);
-//		System.out.println("*********************");
-//		Pattern pattern = Pattern.compile("title=\"\\((.*?)\\)\"");
-//		Matcher m = pattern.matcher(text);
-//		while(m.find()){
-//			String now_group = m.group(1);
-//			System.out.println(now_group);
-//		}
 	}
 
 	public  void  crawl(String type){
 		try {
-			//获取所有满足条件的书籍的url
 			int bookNum = 0;
 			int pageNow = 0;
 			int pageCount = 20;
@@ -53,19 +43,24 @@ public class WebCrawler {
 			Pattern pattern;
 			Matcher m;
 			while(true){
+				//获取不同页的豆瓣访问地址
+				//短时间一直访问会出现403错误
+				Thread.sleep(1000);
 				urlStr = "https://book.douban.com/tag/"+URLEncoder.encode(type)+"?type=S&start="+pageNow*pageCount;
 				returnStr = sendPost(urlStr);
+				//通过正则表达式获得每本书的<li>
 				pattern = Pattern.compile("<li class=\"subject-item\">(.*?)</li>",Pattern.DOTALL);
 				m = pattern.matcher(returnStr);
-				while(m.find()&&bookNum<100){
+				while(m.find()&&bookNum<35){
 					Book book = new Book();
-					
 					String now_group = m.group();
-					//图书的评价人数
-					Pattern evalPattern = Pattern.compile("<span class=\"pl\">\\s*\\(.*?(\\d*?)人评价\\)\\s*</span>",Pattern.DOTALL);
+					//解析<li>获得图书的评价人数，少于1000人评论的直接跳过
+					Pattern evalPattern = Pattern.compile("<span class=\"pl\">\\s*\\((.*?)\\)\\s*</span>",Pattern.DOTALL);
 					Matcher evalMatcher = evalPattern.matcher(now_group);
 					if(evalMatcher.find()){
-						String evalNum = evalMatcher.group(1);
+						String evalStr = evalMatcher.group(1);
+						String evalNum = getNumStr(evalStr);
+						System.out.println(evalNum);
 						if(Integer.parseInt(evalNum)<1000){
 							continue;
 						}
@@ -77,6 +72,7 @@ public class WebCrawler {
 					Matcher titleMatcher = titlePattern.matcher(now_group);
 					if(titleMatcher.find()){
 						String title = titleMatcher.group(1);
+						System.out.println(title);
 						book.setName(title);
 					}
 					//图书的作者，出版社，出版时间，价格
@@ -84,6 +80,7 @@ public class WebCrawler {
 					Matcher infoMatcher = infoPattern.matcher(now_group);
 					if(infoMatcher.find()){
 						String info = infoMatcher.group(1);
+						System.out.println(info);
 						String[] infos = info.split("/");
 						int len = infos.length;
 						book.setAuthor(infos[0]);
@@ -97,21 +94,23 @@ public class WebCrawler {
 					Matcher scoreMatcher = scorePattern.matcher(now_group);
 					if(scoreMatcher.find()){
 						String score = scoreMatcher.group(1);
+						System.out.println(score);
 						book.setScore(score);
 					}
 					
 					book.setId(bookNum+1);
 					books.add(book);
 					bookNum++;
+					System.out.println(bookNum);
 				}
-				if(bookNum>=100){
+				if(bookNum>=35){
 					break;
 				}else{
 					pageNow++; 
 				}
 			}
-			
-			toExcel(books);
+			//将所有书籍写入excel中
+			toExcel(books,type);
 		}catch (Exception e) {
 			e.printStackTrace();
 		}
@@ -130,6 +129,7 @@ public class WebCrawler {
 		connection.setRequestMethod("GET");
 		connection.setReadTimeout(0);
 		connection.connect();
+		//获取状态码
 		int code = connection.getResponseCode();
 		String result = null;
 		InputStream inputStream=null;
@@ -137,7 +137,6 @@ public class WebCrawler {
 		if (code == 200) {
 			inputStream = connection.getInputStream();
 			result = StreamUtil.StreamToString(inputStream);
-			System.out.println(result);
 		}
 		if(inputStream!=null){
 			inputStream.close();
@@ -146,7 +145,7 @@ public class WebCrawler {
 		return result;	
 	}
 	
-	public void toExcel(List<Book> books){
+	public void toExcel(List<Book> books,String type){
 		
 		HSSFWorkbook wb = new HSSFWorkbook();   
 		HSSFSheet sheet = wb.createSheet("书籍表一");  
@@ -196,26 +195,22 @@ public class WebCrawler {
 		
 		 try  
 		 {  
-			 FileOutputStream fout = new FileOutputStream("E:/books.xls");  
+			 FileOutputStream fout = new FileOutputStream("E:/"+type+".xls");  
 		     wb.write(fout);  
 		     fout.close();  
 		 }catch (Exception e){  
 			 e.printStackTrace();  
 		 }  
 
-
-		
 	}
-	public void writeStr(String s){
-		try {
-		FileOutputStream fileOutputStream = new FileOutputStream("E:/str.txt");
-		BufferedWriter bufferedWriter = new BufferedWriter(new OutputStreamWriter(fileOutputStream));
-		bufferedWriter.write(s);
-		
-			bufferedWriter.close();
-		} catch (Exception e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+	//获得字符串中的数字字符串
+	public String getNumStr(String s){
+		String num="";
+		Pattern p = Pattern.compile("[0-9]+");   
+		Matcher m = p.matcher(s);
+		if(m.find()){
+			num = m.group();
 		}
+		return num;
 	}
 }
